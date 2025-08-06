@@ -65,7 +65,7 @@ search_result = client.filter_slugs_for_string("housing")
 print(search_result)
 
 # Fetch url to download data
-download_url = client.get_download_url_for_slug(slug, get_description=True)
+download_url = client.get_download_url_for_slug("house-price-per-square-metre-in-england-and-wales", get_description=True)
 print(download_url)
 
 ---
