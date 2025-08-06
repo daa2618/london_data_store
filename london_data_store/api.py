@@ -1,3 +1,9 @@
+from pathlib import Path
+import sys
+pardir = Path(__file__).resolve().parent
+if str(pardir) not in sys.path:
+    sys.path.insert(0, str(pardir))
+    
 from utils.response import Response 
 from utils.strings_and_lists import ListOperations 
 from utils.logging_helper import BasicLogger #type:ignore
