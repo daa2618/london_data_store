@@ -1,12 +1,13 @@
 from pathlib import Path
 import sys
-pardir = Path(__file__).resolve().parent
-if str(pardir) not in sys.path:
-    sys.path.insert(0, str(pardir))
-    
-from utils.response import Response 
-from utils.strings_and_lists import ListOperations 
-from utils.logging_helper import BasicLogger #type:ignore
+utils_dir = Path(__file__).resolve().parent/"utils"
+if str(utils_dir) not in sys.path:
+    sys.path.insert(0, str(utils_dir))
+print(utils_dir)
+print(sys.path)
+from response import Response 
+from strings_and_lists import ListOperations 
+from logging_helper import BasicLogger #type:ignore
 _bl = BasicLogger(verbose = False, log_directory=None,logger_name="LONDON_DATA_STORE")
 from nltk.stem.snowball import SnowballStemmer
 stemmer = SnowballStemmer("english")

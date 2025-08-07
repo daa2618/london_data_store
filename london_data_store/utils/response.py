@@ -4,7 +4,7 @@ import json
 import time
 import sys
 from pathlib import Path
-from .logging_helper import BasicLogger
+from logging_helper import BasicLogger
 
 
 _bl = BasicLogger(verbose=False, log_directory=None, logger_name="RESPONSE")

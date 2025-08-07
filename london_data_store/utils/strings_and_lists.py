@@ -5,7 +5,7 @@ import numpy as np, re
 import sys
 
 from pathlib import Path
-from .logging_helper import BasicLogger
+from logging_helper import BasicLogger
 
 _bl = BasicLogger(verbose=False, log_directory=None, logger_name="STRINGS AND LISTS")
 
