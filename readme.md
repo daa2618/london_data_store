@@ -1,72 +1,84 @@
-# Personal Python Projects
+# london-data-store
 
-Analyses, automations, and dashboards that power my personal data workflows. The projects span household finance, travel research, sports and media tracking, civic datasets, and general experimentation with Plotly, Google APIs, and custom helper utilities.
+Lightweight Python client for the [London Data Store](https://data.london.gov.uk/) dataset catalogue. It wraps the portal's `export.json` feed so you can discover dataset slugs, filter by file type or keyword, and resolve download URLs (including spatial layers) with minimal boilerplate. Utilities for string similarity, stemming, and logging are bundled to support fuzzy searches and clean diagnostics.
 
-## Highlights
-- Pull structured and unstructured data from Google Sheets, Drive, public APIs, and local snapshots using reusable helper modules.
-- Build Plotly dashboards for budgeting, travel planning, automotive research, streaming behaviour, and broader analytics experiments.
-- Maintain notebooks for exploratory data analysis and reporting workflows across crime statistics, market surveys, Formula 1, TMDB, elections, and more.
-- Centralize credential discovery and cross-project helpers so new pipelines can reuse the same environment.
+## Features
+- Fetch and cache the full dataset catalogue via a single JSON endpoint.
+- Search dataset slugs with Snowball stemming or similarity scoring to handle imperfect queries.
+- Filter datasets by format (CSV, GeoPackage, GeoJSON, Shapefile, etc.) and surface their download URLs.
+- Pull spatial resources directly into GeoPandas and normalise coordinates to EPSG:4326.
+- Shared helpers for resilient HTTP requests, string conversions, and structured logging.
 
-## Directory Guide
-| Path | Notes |
+## Project Layout
+| Path | Description |
 | --- | --- |
-| `google_cloud_console/` | Google API clients, automation scripts, and dashboards (e.g. `household_finance`, `bills_and_utilities`, `car_trips`). |
-| `Finance/` | Historical household expenditure and Yahoo Finance tooling. |
-| `Data/`, `archive/`, `images/` | Local snapshots, exports, processed artefacts, and generated figures. |
-| `notebooks/`, `<domain>/notebooks/` | Jupyter exploration per topic (NYC, crime stats, stock analysis, etc.). |
-| `automotive_stuff/`, `netflix_viewing_figures/`, `stocks/`, `tmdb/`, `election24/`, ... | Topic-specific pipelines, dashboards, and datasets. |
-| `utils/` | Local helpers like `creds_dir.py` for finding the shared credentials directory. |
-| `pyproject.toml`, `poetry.lock`, `requirements.txt` | Dependency manifests (Poetry preferred for reproducibility). |
+| `london_data_store/api.py` | `LondonDataStore` class with catalogue fetch, slug search, download resolution, and spatial helpers. |
+| `london_data_store/utils/response.py` | HTTP wrappers with automatic headers, retries, and JSON handling. |
+| `london_data_store/utils/strings_and_lists.py` | Snowball-based list search, similarity scoring, and numeric string conversion helpers. |
+| `london_data_store/utils/logging_helper.py` | Configurable logger utilities used across the package. |
+| `requirements.txt`, `pyproject.toml` | Dependency manifests (Poetry preferred). |
+| `LICENSE` | MIT licence. |
 
-## Environment Setup
-Use Python 3.11 to match the configured tooling.
+## Installation
+Requires Python 3.11+.
 
-### Option 1: Poetry (recommended)
+### Poetry (recommended)
 ```bash
 poetry install
 poetry shell
 ```
 
-### Option 2: Virtualenv + pip
+### pip
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Scripts\activate on Windows
+source .venv/bin/activate  # Windows: Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Private helper dependency
-Install access to the private Bitbucket package referenced in `pyproject.toml` and `requirements.txt`:
+### NLTK data
+The Snowball stemmer ships with `nltk`, so no extra downloads are needed. If you expand the utilities to use tokenisers, install the required corpora with `nltk.download(...)`.
+
+## Quick Start
+```python
+from london_data_store.api import LondonDataStore
+
+lds = LondonDataStore()
+
+# List every dataset slug available on the portal
+all_slugs = lds.get_all_slugs()
+
+# Fuzzy match slugs containing "population"
+population_slugs = lds.filter_slugs_for_string("population")
+
+# Only keep datasets that publish GeoJSON layers
+geojson_slugs = lds.filter_slug_for_d_type("geojson")
+
+# Inspect download URLs and metadata for a chosen slug
+urls = lds.get_download_url_for_slug(slug="population-projections", get_description=True)
 ```
-helper-tools @ git+https://<token>@bitbucket.org/project-bike-sharing/helper_tools.git
+
+## Working With Spatial Data
+`LondonDataStore.get_map_data_to_plot` wraps GeoPandas to fetch map layers and reproject them for plotting:
+```python
+dat = lds.get_map_data_to_plot(slug="london-borough-profiles", extension="geojson")
+# dat is a GeoDataFrame in EPSG:4326 and ready for Plotly / Folium / GeoPandas plotting
 ```
-Without this package, Google integrations and plotting utilities will not import correctly.
+If multiple files match your criteria, the method returns a list of URLs so you can choose the appropriate layer.
 
-## Credentials & Secrets
-- Google service-account credentials (`supple-rex-310505-cace3ef2016e.json`) must live under a OneDrive-backed `Documents/Creds/` directory. Discovery is handled by `helper_tools.onedrive_ops.find_one_drive_folder()` and `utils/creds_dir.py`.
-- Project-specific tokens (travel APIs, TMDB keys, etc.) can be stored in the same `Creds` folder or surfaced via `.env` files referenced by individual scripts.
-- Keep all secret files outside of version control. If you introduce additional providers, document the expected locations here.
+## String & List Helper Examples
+```python
+from london_data_store.utils.strings_and_lists import StringOperations, ListOperations
 
-## Running Automations & Dashboards
-- **Household finance plots** (`google_cloud_console/google_sheets/household_finance/plots.py`)
-  ```bash
-  poetry run python google_cloud_console/google_sheets/household_finance/plots.py
-  ```
-  Instantiate `OverviewPlots(save_plot=True)` to export PNGs to `household_finance/images/`.
+value = StringOperations("1.2M residents").convert_to_integer()  # 1200000
 
-- **Household data ingestion**  
-  Modules such as `expenses.py`, `income.py`, and `savings.py` wrap Google Sheets fetch-and-clean routines. They rely on the spreadsheet URL defined in `household_finance/__init__.py` and the credentials outlined above.
+search = ListOperations(["Road Safety", "cycling journeys", "Bus usage"], search_string="cycle")
+matches = search.search_list_by_snowball()  # -> ["cycling journeys"]
+```
 
-- **Notebook workflows**  
-  Launch with `poetry run jupyter lab` (or `notebook`). Notebooks live under the top-level `notebooks/` directory and within topic subfolders.
+## Logging & Diagnostics
+`logging_helper.BasicLogger` provides consistent console/file logging with rotation support. Pass `verbose=True` when debugging to surface HTTP requests, match decisions, and download metadata.
 
-For new scripts, reuse helpers from the `helper_tools` package (Plotly theming, Drive utilities, request wrappers) to stay consistent.
-
-## Data Management
-- Large or sensitive datasets are excluded from Git. Scripts generally expect local CSVs within `Data/` or project folders; confirm required inputs before execution.
-- Generated artefacts (reports, charts, PDFs) typically land in sibling `images/` or `archive/` directories. Remove temporary outputs before committing unless they are intentional results.
-
-## Development Workflow
-- Target Python 3.11 features and typing conventions used across the repo.
-- Formatting and linting are optional; run your preferred tooling (`ruff`, `black`, etc.) before committing changes.
-- When introducing new domains or automations, update the directory table and capture any new external dependencies or credential requirements in this README.
+## Development Notes
+- Target Python 3.11 and keep dependencies aligned with `pyproject.toml`.
+- GeoPandas requires native libraries (GEOS, GDAL). Install platform-specific prerequisites before running the spatial helpers.
+- Add automated tests or notebooks under a separate folder if you extend functionality, and document new endpoints or utilities in this README.
