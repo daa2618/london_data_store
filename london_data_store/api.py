@@ -319,6 +319,9 @@ class LondonDataStore:
                 f"Try extensions from {ext_for_slug}"
             )
 
+        if len(urls) != 1:
+            return urls
+
         try:
             import geopandas as gpd
         except ImportError:
@@ -326,18 +329,13 @@ class LondonDataStore:
                 "geopandas is required for spatial data. Install it with: pip install london-data-store[geo]"
             ) from None
 
-        if len(urls) == 1:
-            url = urls[0]
+        dat = gpd.read_file(urls[0])
 
-            dat = gpd.read_file(url)
+        if dat.crs.to_epsg() is None:
+            dat = dat.set_crs(crs="EPSG:27700", allow_override=True)
 
-            if dat.crs.to_epsg() is None:
-                dat = dat.set_crs(crs="EPSG:27700", allow_override=True)
-
-            dat = dat.to_crs(crs="EPSG:4326")
-            return dat
-        else:
-            return urls
+        dat = dat.to_crs(crs="EPSG:4326")
+        return dat
 
     # ── v2 methods ─────────────────────────────────────────────────
 
