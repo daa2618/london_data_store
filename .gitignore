@@ -2,3 +2,13 @@
 notebooks
 data
 *.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.DS_Store
+logs/
+.ruff_cache/
+
+AGENT_LOGGING_PROTOCOL.md
+CLAUDE.md
