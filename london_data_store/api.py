@@ -297,13 +297,6 @@ class LondonDataStore:
             ValueError: If no map data is found for the given slug and extension.
             ImportError: If geopandas is not installed.
         """
-        try:
-            import geopandas as gpd
-        except ImportError:
-            raise ImportError(
-                "geopandas is required for spatial data. Install it with: pip install london-data-store[geo]"
-            ) from None
-
         _validate_string(slug, "slug")
         _validate_string(extension, "extension")
 
@@ -326,7 +319,14 @@ class LondonDataStore:
                 f"Try extensions from {ext_for_slug}"
             )
 
-        elif len(urls) == 1:
+        try:
+            import geopandas as gpd
+        except ImportError:
+            raise ImportError(
+                "geopandas is required for spatial data. Install it with: pip install london-data-store[geo]"
+            ) from None
+
+        if len(urls) == 1:
             url = urls[0]
 
             dat = gpd.read_file(url)
