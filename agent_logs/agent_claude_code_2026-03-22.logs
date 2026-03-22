@@ -367,3 +367,334 @@ Final state: 114 tests passing, ruff lint clean, ruff format clean, CLAUDE.md up
 - `pyproject.toml`
 - `.gitignore`
 - `CLAUDE.md`
+
+---
+
+# [SESSION START] 2026-03-22 - V2 Features Implementation (branch: v2-features)
+
+---
+
+## [2026-03-22 02:00:00 UTC] V2 Planning & API Research
+
+### Context
+- User requested a v2 plan for the project: "What additional features can be added?"
+- Needed to understand full API response schema to identify unused fields
+
+### Action Taken
+- Fetched live API response from `https://data.london.gov.uk/api/v2/datasets/export.json`
+- Discovered 23+ unused dataset fields and 9+ unused resource fields
+- Created 7-phase v2 plan: Foundation, Caching, Search/Detail/Topics, Download, CLI, Async, Polish
+- User approved plan and requested implementation on new `v2-features` branch
+
+### Outcome
+- Comprehensive plan created and approved with dependency graph between phases
+
+### Bugs / Errors Encountered
+N/A
+
+### Fix or Mitigation
+N/A
+
+### Pitfalls & Future Risks
+- API is a single ~10MB JSON export — no pagination or per-dataset endpoints available
+
+### Best Practices & Lessons Learned
+- Analyzing the actual API response before planning ensures features align with available data
+
+### New Technologies / Tools Used
+N/A
+
+### Follow-ups / TODOs
+- Execute all 7 phases on `v2-features` branch
+
+---
+
+## [2026-03-22 02:15:00 UTC] Phase 1: Foundation — Exceptions, Expanded Models, V2 URL
+
+### Context
+- Establish type system and error hierarchy that all subsequent phases build on
+
+### Action Taken
+- **`london_data_store/exceptions.py`** (NEW): Custom exception hierarchy — `LondonDataStoreError` base, `DatasetNotFoundError`, `FormatNotAvailableError` (both also subclass `ValueError` for backward compat), `DownloadError`, `CacheError`
+- **`london_data_store/models.py`** (EXPANDED): Added 20+ fields to Dataset (`id`, `title`, `canonical`, `topics`, `licence_url`, `licence_title`, `contact`, `publisher`, `update_frequency`, `created_at`, `archived_at`, `sharing`, `webpage`, `geo`, `author`, `author_email`, `parent`, `team`), 8+ fields to Resource (`title`, `description`, `temporal_coverage_from/to`, `check_hash`, `check_size`, `check_http_status`, `check_mimetype`, `check_timestamp`), `is_archived` property, updated `from_api_dict()` to handle nested `licence` and `custom` objects
+- **`london_data_store/api.py`**: Changed default URL to v2, replaced `ValueError` with custom exceptions
+- **`london_data_store/__init__.py`**: Exported all exceptions
+- **`tests/conftest.py`**: Enriched `SAMPLE_CATALOGUE` with all v2 fields
+- **`tests/test_exceptions.py`** (NEW): 7 tests for exception hierarchy and backward compat
+- **`tests/test_models.py`** (EXPANDED): Added 9 tests for v2 fields, `is_archived`, `from_api_dict` with nested licence/custom
+
+### Outcome
+- Success — all tests passing, foundation ready for subsequent phases
+
+### Bugs / Errors Encountered
+- Write tool "File has been modified since read" errors — had to Read files before Write
+- Ruff UP017 (`timezone.utc` → `datetime.UTC`), F401, B905 — auto-fixed
+
+### Fix or Mitigation
+- Read-before-write pattern for all file modifications
+- `ruff check . --fix` for auto-fixable issues, manual fix for B905 (`zip()` without `strict=`)
+
+### Pitfalls & Future Risks
+- `DatasetNotFoundError(ValueError)` dual inheritance is a transitional measure — plan to remove `ValueError` base in v3
+
+### Best Practices & Lessons Learned
+- Multiple inheritance for backward-compatible exceptions works well during transitions
+
+### New Technologies / Tools Used
+N/A
+
+### Follow-ups / TODOs
+N/A
+
+---
+
+## [2026-03-22 02:30:00 UTC] Phase 2: Disk Caching
+
+### Context
+- Avoid re-fetching ~10MB catalogue on every instantiation
+
+### Action Taken
+- **`london_data_store/cache.py`** (NEW): `CatalogueCache` class with disk persistence, TTL (default 24h), atomic writes (`tempfile.mkstemp` + `os.replace`), MD5-based cache keys, `.meta.json` sibling for timestamps, invalidation
+- **`pyproject.toml`**: Added `platformdirs >=4.0,<5.0` to core deps
+- **`london_data_store/api.py`**: Integrated cache — `__init__` accepts `cache`, `cache_ttl`, `cache_dir`; `get_data_from_url()` checks cache first; added `clear_cache()`
+- **`tests/test_cache.py`** (NEW): 17 tests for TTL, hit/miss, invalidation, corruption, atomic writes, integration with api.py
+
+### Outcome
+- Success — catalogue cached to `platformdirs.user_cache_dir("london-data-store")/catalogue_{md5}.json`
+
+### Bugs / Errors Encountered
+- `poetry lock --no-update` invalid flag — used `poetry lock` instead
+- Ruff SIM105: replaced try/except/pass with `contextlib.suppress(OSError)` in cache cleanup
+
+### Fix or Mitigation
+- Used `poetry lock` without flag
+- Applied contextlib.suppress pattern
+
+### Pitfalls & Future Risks
+- Cache uses `json.dump`/`json.load` — if catalogue grows beyond memory, streaming parser would be needed
+
+### Best Practices & Lessons Learned
+- Atomic writes (`tempfile` + `os.replace`) prevent corrupt cache files on crash/interrupt
+
+### New Technologies / Tools Used
+- `platformdirs` for cross-platform cache directory
+- `tempfile.mkstemp` + `os.replace` for atomic file writes
+
+### Follow-ups / TODOs
+N/A
+
+---
+
+## [2026-03-22 02:45:00 UTC] Phase 3: Scored Search, Dataset Detail, Topic Filtering
+
+### Context
+- Richer discovery methods returning typed models and scores
+
+### Action Taken
+- **`london_data_store/utils/strings_and_lists.py`**: Added `ListOperations.search_list_with_scores()` returning `list[tuple[str, float]]` sorted by score descending
+- **`london_data_store/api.py`**: Added 8 new methods — `search()`, `get_dataset()`, `get_all_topics()`, `filter_by_topic()`, `filter_by_publisher()`, `filter_by_update_frequency()`, `filter_by_licence()`, `download_file()`
+- **`tests/test_api.py`** (EXPANDED): Added ~35 tests for all new methods
+
+### Outcome
+- Success — scored search, typed dataset retrieval, and multi-axis filtering all working
+
+### Bugs / Errors Encountered
+- Ruff B905 on `zip(non_empty, scores)` without `strict=True`
+
+### Fix or Mitigation
+- Added `strict=True` to zip call
+
+### Pitfalls & Future Risks
+N/A
+
+### Best Practices & Lessons Learned
+- Exposing raw similarity scores lets users set their own relevance thresholds
+
+### New Technologies / Tools Used
+N/A
+
+### Follow-ups / TODOs
+N/A
+
+---
+
+## [2026-03-22 03:00:00 UTC] Phase 4: File Download
+
+### Context
+- Streaming file downloads with integrity verification
+
+### Action Taken
+- **`london_data_store/download.py`** (NEW): `DownloadManager` with streaming downloads, `.part` temp file + atomic rename, progress callbacks, incremental MD5 integrity verification, size verification
+- **`london_data_store/api.py`**: Added `download_file()` method using `DownloadManager`
+- **`tests/test_download.py`** (NEW): 18 tests for streaming, progress, hash pass/fail, HTTP errors, api integration
+
+### Outcome
+- Success — downloads stream to `.part` file, verify MD5/size, then atomic rename
+
+### Bugs / Errors Encountered
+- Dead code in download.py (`with open(os.devnull, "w"): pass`) — replaced with `contextlib.suppress(OSError)`
+- Ruff F841 unused variable `mock_dl` — removed `as mock_dl` from `with patch.object(...)`
+
+### Fix or Mitigation
+- Cleaned up error handling patterns
+
+### Pitfalls & Future Risks
+- MD5 hash comparison strips version suffix (e.g., `abc123-1` → `abc123`) since API includes version suffixes in `check_hash`
+
+### Best Practices & Lessons Learned
+- `.part` temp file + atomic rename prevents incomplete downloads from being used
+
+### New Technologies / Tools Used
+- `hashlib.md5` for incremental integrity verification
+
+### Follow-ups / TODOs
+N/A
+
+---
+
+## [2026-03-22 03:15:00 UTC] Phase 5: Rich CLI
+
+### Context
+- New subcommands, output formatting, download support
+
+### Action Taken
+- **`london_data_store/cli.py`** (REWRITTEN): Added global options (`--json`, `--format {table,plain}`, `--limit`, `--no-cache`), new subcommands (`info <slug>`, `topics [--filter]`, `download <slug> [--format] [--dest] [--progress]`), enhanced `search` with `--scored`, added `_format_table()` and `_output()` helpers
+- **`tests/test_cli.py`** (REWRITTEN): 22 tests covering all subcommands
+
+### Outcome
+- Success — all subcommands working with JSON/table/plain output modes
+
+### Bugs / Errors Encountered
+- Ruff E501 (line too long) in cli.py f-string
+
+### Fix or Mitigation
+- Extracted variables from f-string to reduce line length
+
+### Pitfalls & Future Risks
+N/A
+
+### Best Practices & Lessons Learned
+- `argparse` subcommands + `--json` flag gives a clean programmatic interface
+
+### New Technologies / Tools Used
+N/A
+
+### Follow-ups / TODOs
+N/A
+
+---
+
+## [2026-03-22 03:30:00 UTC] Phase 6: Async Client
+
+### Context
+- Async alternative using httpx for concurrent operations
+
+### Action Taken
+- **`pyproject.toml`**: Added `async = ["httpx (>=0.27.0,<1.0.0)"]` optional extra, `pytest-asyncio` to dev deps
+- **`london_data_store/async_client.py`** (NEW): `AsyncLondonDataStore` with same API surface as sync client (context manager, `get_all_slugs`, `search`, `get_dataset`, `get_all_topics`, `filter_by_topic`, `filter_slugs_for_keyword`, `download_file`, `clear_cache`). Reuses `CatalogueCache`, models, exceptions — only HTTP layer differs.
+- **`london_data_store/__init__.py`**: Conditional export of `AsyncLondonDataStore` if httpx available
+- **`tests/test_async_client.py`** (NEW): 16 tests using pytest-asyncio
+
+### Outcome
+- Success — async client fully functional with httpx
+
+### Bugs / Errors Encountered
+- Ruff F401 on conditional `AsyncLondonDataStore` import in `__init__.py`
+
+### Fix or Mitigation
+- Added `# noqa: F401` comment since the import is intentionally re-exported
+
+### Pitfalls & Future Risks
+- Async client reuses sync disk cache (CatalogueCache) — disk I/O is fast enough but technically blocking
+
+### Best Practices & Lessons Learned
+- Conditional imports with try/except + `__all__.append()` cleanly handle optional dependencies
+
+### New Technologies / Tools Used
+- `httpx` for async HTTP client
+- `pytest-asyncio` for async test support
+
+### Follow-ups / TODOs
+N/A
+
+---
+
+## [2026-03-22 03:45:00 UTC] Phase 7: Polish
+
+### Context
+- Final polish: README, deprecation warnings, CI, CLAUDE.md, verification
+
+### Action Taken
+- **`README.md`** (REWRITTEN): Updated for v2 — documents disk caching, scored search, get_dataset, topic/publisher/licence filtering, file download, async client, all CLI subcommands, caching API
+- **`london_data_store/api.py`**: Added `DeprecationWarning` to `filter_slugs_for_string()` recommending `search()`
+- **`london_data_store/cli.py`**: Switched non-scored search from deprecated `filter_slugs_for_string` to `search()` method
+- **`tests/test_api.py`**: Updated `TestFilterSlugsForString` tests to expect `DeprecationWarning`
+- **`.github/workflows/ci.yml`**: Added `v2-features` branch, `.[async]` extra in install
+- **`CLAUDE.md`**: Updated with full v2 architecture documentation
+- Final verification: `ruff check .` clean, `ruff format --check .` clean, 229 tests passing
+
+### Outcome
+- Success — all 7 phases complete, 229 tests passing, lint/format clean
+
+### Bugs / Errors Encountered
+- Ruff SIM117: nested `with` statements in test_api.py — auto-fixed to combined `with` statements
+- CLI `search` command (non-scored) triggered deprecation warning as error in strict mode
+
+### Fix or Mitigation
+- Auto-fixed SIM117 with `ruff check . --fix`
+- Switched CLI to use `search()` directly instead of deprecated `filter_slugs_for_string()`
+
+### Pitfalls & Future Risks
+- Deprecation warning on `filter_slugs_for_string` will surface in user code — plan removal in v3
+
+### Best Practices & Lessons Learned
+- Internal code should not call deprecated methods — switch to new APIs immediately
+- Test for deprecation warnings explicitly with `pytest.warns()`
+
+### New Technologies / Tools Used
+N/A
+
+### Follow-ups / TODOs
+- Consider removing `filter_slugs_for_string` in v3
+- Consider async disk cache for high-concurrency scenarios
+
+---
+
+## [2026-03-22 03:50:00 UTC] V2 Session Summary
+
+### Overall Session Summary
+Implemented complete v2 of `london_data_store` across 7 phases on the `v2-features` branch:
+- **Phase 1 (Foundation)**: Custom exception hierarchy, expanded models (20+ Dataset fields, 8+ Resource fields), v2 API URL
+- **Phase 2 (Caching)**: Disk-based catalogue caching with TTL, atomic writes, platformdirs
+- **Phase 3 (Search/Detail/Topics)**: Scored search, `get_dataset()`, filter by topic/publisher/update_frequency/licence
+- **Phase 4 (Download)**: Streaming file downloads with MD5 integrity, progress callbacks, atomic writes
+- **Phase 5 (CLI)**: New subcommands (info, topics, download), --json/--format/--limit/--scored/--no-cache
+- **Phase 6 (Async)**: `AsyncLondonDataStore` using httpx with full API parity
+- **Phase 7 (Polish)**: README rewrite, deprecation warnings, final verification
+
+Final state: 229 tests passing (up from 114), ruff lint clean, ruff format clean, version 0.2.0.
+
+### Files Created
+- `london_data_store/exceptions.py`
+- `london_data_store/cache.py`
+- `london_data_store/download.py`
+- `london_data_store/async_client.py`
+- `tests/test_exceptions.py`
+- `tests/test_cache.py`
+- `tests/test_download.py`
+- `tests/test_async_client.py`
+
+### Files Modified
+- `london_data_store/api.py` (v2 URL, cache integration, 8 new methods, deprecation warnings)
+- `london_data_store/models.py` (20+ new fields, nested object handling)
+- `london_data_store/cli.py` (rewritten with 8 subcommands, global options)
+- `london_data_store/__init__.py` (exception exports, conditional async export)
+- `london_data_store/utils/strings_and_lists.py` (search_list_with_scores)
+- `tests/conftest.py` (enriched sample catalogue with v2 fields)
+- `tests/test_api.py` (expanded with v2 method tests, deprecation tests)
+- `tests/test_models.py` (expanded with v2 field tests)
+- `tests/test_cli.py` (rewritten for all subcommands)
+- `pyproject.toml` (v0.2.0, platformdirs, httpx, pytest-asyncio)
+- `.github/workflows/ci.yml` (v2-features branch, async extra)
+- `README.md` (full v2 documentation)
+- `CLAUDE.md` (v2 architecture)

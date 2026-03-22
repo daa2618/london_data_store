@@ -1,13 +1,20 @@
 import datetime
 import os
 import re
+import warnings
+from collections.abc import Callable
 from itertools import chain
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from .cache import CatalogueCache
+from .download import DownloadManager
+from .exceptions import DatasetNotFoundError, FormatNotAvailableError
+from .models import Dataset
 from .utils.logging_helper import BasicLogger
 from .utils.response import Response
 from .utils.strings_and_lists import ListOperations
@@ -59,11 +66,18 @@ class LondonDataStore:
                                  Defaults to "https://data.london.gov.uk/api/datasets/export.json".
     """
 
-    def __init__(self, json_url: str = "https://data.london.gov.uk/api/datasets/export.json"):
+    def __init__(
+        self,
+        json_url: str = "https://data.london.gov.uk/api/v2/datasets/export.json",
+        cache: bool = True,
+        cache_ttl: int = 86400,
+        cache_dir: Path | None = None,
+    ):
         self.json_url = json_url
         self._raw_response_json = None
         self._all_d_types = None
         self._base_url = None
+        self._cache = CatalogueCache(cache_dir=cache_dir, ttl_seconds=cache_ttl) if cache else None
 
         # Shared session with automatic retries
         self._session = requests.Session()
@@ -97,20 +111,35 @@ class LondonDataStore:
     def get_data_from_url(self) -> list[dict] | None:
         """Retrieves JSON data from a specified URL.
 
-        This method fetches JSON data from the URL stored in the `self.json_url` attribute
-        using a `Response` object (assumed to be a custom class handling HTTP requests).
-        It then returns the parsed JSON data as a dictionary.
+        Checks disk cache first (if caching is enabled). On cache miss,
+        fetches from the network and caches the result.
 
         Returns:
             dict: The JSON data retrieved from the URL, or None on error.
 
         """
         if self._raw_response_json is None:
+            # Try cache first
+            if self._cache is not None:
+                cached = self._cache.get(self.json_url)
+                if cached is not None:
+                    self._raw_response_json = cached
+                    return self._raw_response_json
+
             response_dict = Response(self.json_url, session=self._session).get_json_from_response()
             if not response_dict:
                 return
             self._raw_response_json = response_dict
+
+            # Store in cache
+            if self._cache is not None:
+                self._cache.put(self.json_url, response_dict)
         return self._raw_response_json
+
+    def clear_cache(self) -> None:
+        """Invalidate the cached catalogue for this instance's URL."""
+        if self._cache is not None:
+            self._cache.invalidate(self.json_url)
 
     def get_all_slugs(self) -> list[str]:
         """Retrieves a sorted list of unique slugs from data fetched from a URL.
@@ -130,6 +159,9 @@ class LondonDataStore:
     def filter_slugs_for_string(self, string: str) -> list[str] | None:
         """Filters a list of slugs to retain only those containing a given string.
 
+        .. deprecated:: 0.2.0
+            Use :meth:`search` instead, which returns scored results.
+
         Args:
             string: The string to search for within the slugs.
 
@@ -137,6 +169,11 @@ class LondonDataStore:
             A list of slugs containing the input string.  Returns None if no
             slugs match.
         """
+        warnings.warn(
+            "filter_slugs_for_string() is deprecated, use search() for scored results",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         _validate_string(string, "string")
         return _search_list_for_string(self.get_all_slugs(), string)
 
@@ -175,14 +212,14 @@ class LondonDataStore:
             req_format = "geopackage"
 
         if req_format not in self.get_all_d_types():
-            raise ValueError(f"Available Data types: {', '.join(self.get_all_d_types())}")
+            raise FormatNotAvailableError(f"Available Data types: {', '.join(self.get_all_d_types())}")
         filtered = [
             y.get("slug")
             for y in self.get_data_from_url()
             if req_format in [x.get("format") for x in [value for key, value in y.get("resources").items()]]
         ]
         if not filtered:
-            raise ValueError("No slugs was found for the required data type")
+            raise FormatNotAvailableError("No slugs was found for the required data type")
         else:
             return filtered
 
@@ -284,7 +321,7 @@ class LondonDataStore:
         urls = [x for x in urls if x.endswith(extension)]
 
         if not urls:
-            raise ValueError(
+            raise DatasetNotFoundError(
                 f"The given slug '{slug}' does not have any map data associated with it\n"
                 f"Try extensions from {ext_for_slug}"
             )
@@ -301,3 +338,192 @@ class LondonDataStore:
             return dat
         else:
             return urls
+
+    # ── v2 methods ─────────────────────────────────────────────────
+
+    def search(self, term: str, limit: int = 20) -> list[tuple[str, float]]:
+        """Search slugs by term, returning (slug, score) pairs sorted by score descending.
+
+        Uses SequenceMatcher similarity scoring against all slugs.
+
+        Args:
+            term: The search term.
+            limit: Maximum number of results to return.
+
+        Returns:
+            A list of (slug, score) tuples sorted by score descending.
+        """
+        _validate_string(term, "term")
+        list_ops = ListOperations(self.get_all_slugs(), search_string=term)
+        scored = list_ops.search_list_with_scores()
+        return scored[:limit]
+
+    def get_dataset(self, slug: str) -> Dataset:
+        """Return a fully-populated Dataset model for the given slug.
+
+        Args:
+            slug: The dataset slug identifier.
+
+        Returns:
+            A Dataset instance with all available fields populated.
+
+        Raises:
+            DatasetNotFoundError: If no dataset matches the slug.
+        """
+        _validate_string(slug, "slug")
+        for item in self.get_data_from_url():
+            if item.get("slug") == slug:
+                return Dataset.from_api_dict(item)
+        raise DatasetNotFoundError(f"Dataset with slug '{slug}' not found")
+
+    def get_all_topics(self) -> list[str]:
+        """Return a sorted list of all unique topic categories in the catalogue.
+
+        Returns:
+            A sorted list of topic strings.
+        """
+        topics = set()
+        for item in self.get_data_from_url():
+            for topic in item.get("topics", []):
+                topics.add(topic)
+        return sorted(topics)
+
+    def filter_by_topic(self, topic: str) -> list[str]:
+        """Return slugs of datasets tagged with the given topic.
+
+        Args:
+            topic: The topic category to filter by.
+
+        Returns:
+            A list of matching slug strings.
+        """
+        _validate_string(topic, "topic")
+        return [x.get("slug") for x in self.get_data_from_url() if topic in x.get("topics", [])]
+
+    def filter_by_publisher(self, publisher: str) -> list[str]:
+        """Return slugs where publisher matches (case-insensitive substring).
+
+        Args:
+            publisher: The publisher name or substring to match.
+
+        Returns:
+            A list of matching slug strings.
+        """
+        _validate_string(publisher, "publisher")
+        publisher_lower = publisher.lower()
+        return [
+            x.get("slug") for x in self.get_data_from_url() if publisher_lower in (x.get("publisher") or "").lower()
+        ]
+
+    def filter_by_update_frequency(self, frequency: str) -> list[str]:
+        """Return slugs with the given update frequency.
+
+        Args:
+            frequency: The update frequency string (e.g., 'Monthly', 'Annual', 'One off').
+
+        Returns:
+            A list of matching slug strings.
+        """
+        _validate_string(frequency, "frequency")
+        frequency_lower = frequency.lower()
+        return [
+            x.get("slug")
+            for x in self.get_data_from_url()
+            if frequency_lower == (x.get("custom", {}).get("update_frequency") or "").lower()
+        ]
+
+    def filter_by_licence(self, licence_keyword: str) -> list[str]:
+        """Return slugs whose licence title contains the keyword.
+
+        Args:
+            licence_keyword: A keyword to search for in licence titles.
+
+        Returns:
+            A list of matching slug strings.
+        """
+        _validate_string(licence_keyword, "licence_keyword")
+        keyword_lower = licence_keyword.lower()
+        return [
+            x.get("slug")
+            for x in self.get_data_from_url()
+            if keyword_lower in (x.get("licence", {}).get("title") or "").lower()
+        ]
+
+    def download_file(
+        self,
+        slug: str,
+        format: str | None = None,
+        destination: str | Path = ".",
+        *,
+        resource_key: str | None = None,
+        progress_callback: Callable[[int, int | None], None] | None = None,
+        verify_integrity: bool = True,
+    ) -> Path:
+        """Download a resource file for the given dataset slug.
+
+        If format is specified, downloads the first matching resource.
+        If resource_key is specified, downloads that exact resource.
+        Destination can be a directory (filename inferred) or a full path.
+
+        Args:
+            slug: The dataset slug.
+            format: File format to match (e.g., 'csv', 'geojson'). Downloads first match.
+            destination: Target path (directory or file). Defaults to current directory.
+            resource_key: Specific resource key to download.
+            progress_callback: Called with (bytes_downloaded, total_bytes) after each chunk.
+            verify_integrity: If True, verify hash and size from resource metadata.
+
+        Returns:
+            The final file path.
+
+        Raises:
+            DatasetNotFoundError: If slug not found.
+            FormatNotAvailableError: If format not found for slug.
+            DownloadError: On download or integrity failure.
+        """
+        _validate_string(slug, "slug")
+        dataset = self.get_dataset(slug)
+
+        # Find the matching resource
+        resource = None
+        if resource_key:
+            for r in dataset.resources:
+                if r.key == resource_key:
+                    resource = r
+                    break
+            if resource is None:
+                raise DatasetNotFoundError(f"Resource key '{resource_key}' not found in dataset '{slug}'")
+        elif format:
+            fmt = format.lower()
+            if fmt == "gpkg":
+                fmt = "geopackage"
+            for r in dataset.resources:
+                if r.format.lower() == fmt:
+                    resource = r
+                    break
+            if resource is None:
+                available = [r.format for r in dataset.resources]
+                raise FormatNotAvailableError(
+                    f"Format '{format}' not found for slug '{slug}'. Available: {', '.join(available)}"
+                )
+        else:
+            if not dataset.resources:
+                raise DatasetNotFoundError(f"No resources found for slug '{slug}'")
+            resource = dataset.resources[0]
+
+        # Build download URL
+        url_path = urlsplit(resource.url).path.split("/")[-1]
+        download_url = f"{self.base_url}/download/{slug}/{resource.key}/{url_path}"
+
+        # Prepare integrity check params
+        expected_hash = resource.check_hash if verify_integrity else None
+        expected_size = resource.check_size if verify_integrity else None
+
+        manager = DownloadManager(self._session)
+        return manager.download_file(
+            url=download_url,
+            destination=Path(destination),
+            progress_callback=progress_callback,
+            expected_hash=expected_hash,
+            expected_size=expected_size,
+        )

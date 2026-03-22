@@ -148,6 +148,18 @@ class ListOperations:
         """
         return [SequenceMatcher(None, x.lower(), self.search_string.lower()).ratio() for x in self.search_list if x]
 
+    def search_list_with_scores(self) -> list[tuple[str, float]]:
+        """Return all (item, score) pairs from SequenceMatcher, sorted by score descending.
+
+        Returns:
+            A list of (item, score) tuples sorted by score descending.
+        """
+        scores = self._get_matching_scores_for_string()
+        non_empty = [x for x in self.search_list if x]
+        pairs = list(zip(non_empty, scores, strict=True))
+        pairs.sort(key=lambda x: x[1], reverse=True)
+        return pairs
+
     def get_best_matching_string(self) -> str:
         """
         Finds the string in a list that has the highest similarity ratio to a given string.
