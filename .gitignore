@@ -2,3 +2,5 @@
 notebooks
 data
 *.pyc
+AGENT_LOGGING_PROTOCOL.md
+CLAUDE.md
