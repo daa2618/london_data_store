@@ -36,14 +36,14 @@ class TestSlugsCommand:
         assert "cycling-infrastructure" in output
 
     def test_slugs_json(self, mock_lds, capsys):
-        result = main(["--json", "slugs"])
+        result = main(["slugs", "--json"])
         assert result == 0
         output = json.loads(capsys.readouterr().out)
         assert isinstance(output, list)
         assert "population-projections" in output
 
     def test_slugs_limit(self, mock_lds, capsys):
-        result = main(["--limit", "1", "slugs"])
+        result = main(["slugs", "--limit", "1"])
         assert result == 0
         output = capsys.readouterr().out.strip().split("\n")
         assert len(output) == 1
@@ -54,7 +54,10 @@ class TestSearchCommand:
         result = main(["search", "population"])
         assert result == 0
         output = capsys.readouterr().out
-        assert "population" in output
+        # Should show title, slug, and date
+        assert "Population" in output
+        assert "population-projections" in output
+        assert "2025" in output
 
     def test_search_not_found(self, mock_lds, capsys):
         result = main(["search", "xyznonexistent"])
@@ -65,19 +68,22 @@ class TestSearchCommand:
         result = main(["search", "--scored", "cycling"])
         assert result == 0
         output = capsys.readouterr().out
-        # Should contain score and slug
+        # Should contain score, title, and slug
+        assert "Cycling Infrastructure" in output
         assert "cycling-infrastructure" in output
         # Score is a float like 0.xxxx
         lines = output.strip().split("\n")
         assert any("." in line.split()[0] for line in lines if line.strip())
 
     def test_search_scored_json(self, mock_lds, capsys):
-        result = main(["--json", "search", "--scored", "cycling"])
+        result = main(["search", "--json", "--scored", "cycling"])
         assert result == 0
         output = json.loads(capsys.readouterr().out)
         assert isinstance(output, list)
+        assert output[0]["title"] == "Cycling Infrastructure"
         assert output[0]["slug"] == "cycling-infrastructure"
         assert "score" in output[0]
+        assert "date" in output[0]
 
 
 class TestFormatsCommand:
@@ -106,7 +112,7 @@ class TestKeywordsCommand:
         result = main(["keywords", "cycling"])
         assert result == 0
         output = capsys.readouterr().out
-        assert "cycling-infrastructure" in output
+        assert "Cycling Infrastructure" in output
 
     def test_keywords_not_found(self, mock_lds, capsys):
         result = main(["keywords", "xyznonexistent"])
@@ -122,7 +128,7 @@ class TestInfoCommand:
         assert "Greater London Authority" in output
 
     def test_info_json(self, mock_lds, capsys):
-        result = main(["--json", "info", "population-projections"])
+        result = main(["info", "population-projections", "--json"])
         assert result == 0
         output = json.loads(capsys.readouterr().out)
         assert output["slug"] == "population-projections"
@@ -149,7 +155,7 @@ class TestTopicsCommand:
         assert "population-projections" not in output
 
     def test_topics_json(self, mock_lds, capsys):
-        result = main(["--json", "topics"])
+        result = main(["topics", "--json"])
         assert result == 0
         output = json.loads(capsys.readouterr().out)
         assert "demographics" in output
@@ -179,5 +185,5 @@ class TestNoCommand:
 
     def test_no_cache_flag(self, mock_lds, capsys):
         """--no-cache should be accepted without error."""
-        result = main(["--no-cache", "slugs"])
+        result = main(["slugs", "--no-cache"])
         assert result == 0

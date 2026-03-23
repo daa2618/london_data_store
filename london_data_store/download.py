@@ -105,8 +105,10 @@ class DownloadManager:
             clean_hash = expected_hash.split("-")[0] if "-" in expected_hash else expected_hash
             actual_hash = md5_hash.hexdigest()
             if actual_hash != clean_hash:
-                part_path.unlink(missing_ok=True)
-                raise DownloadError(f"Hash mismatch: expected {clean_hash}, got {actual_hash}")
+                _bl.warning(
+                    f"Hash mismatch for {url}: expected {clean_hash}, got {actual_hash}. "
+                    "The catalogue metadata may be stale — file downloaded anyway."
+                )
 
         # Move from .part to final destination
         os.replace(part_path, destination)

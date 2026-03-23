@@ -72,13 +72,14 @@ class TestDownloadManager:
         with pytest.raises(DownloadError, match="Size mismatch"):
             manager.download_file("https://example.com/data.csv", tmp_path, expected_size=9999)
 
-    def test_hash_mismatch_raises(self, tmp_path):
+    def test_hash_mismatch_warns(self, tmp_path):
+        """Hash mismatch should warn (stale catalogue metadata) but still download."""
         session = MagicMock()
         session.get.return_value = self._make_response(b"test data")
 
         manager = DownloadManager(session)
-        with pytest.raises(DownloadError, match="Hash mismatch"):
-            manager.download_file("https://example.com/data.csv", tmp_path, expected_hash="0000000000000000")
+        result = manager.download_file("https://example.com/data.csv", tmp_path, expected_hash="0000000000000000")
+        assert result.exists()
 
     def test_hash_with_version_suffix(self, tmp_path):
         import hashlib

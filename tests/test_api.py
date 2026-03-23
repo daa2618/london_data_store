@@ -288,7 +288,7 @@ class TestSearch:
 
     def test_best_match_is_first(self, mock_client):
         results = mock_client.search("cycling")
-        assert results[0][0] == "cycling-infrastructure"
+        assert results[0][0] == "Cycling Infrastructure"
 
 
 # ── get_dataset (v2) ─────────────────────────────────────────────

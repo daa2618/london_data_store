@@ -49,51 +49,57 @@ def _output(data, args, *, default_format="plain"):
 
 
 def main(argv=None):
+    # Shared options inherited by all subcommands
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON")
+    shared.add_argument(
+        "--output-format", choices=["table", "plain"], default="plain", dest="output_format", help="Output format"
+    )
+    shared.add_argument("--limit", type=int, default=None, help="Limit number of results")
+    shared.add_argument("--no-cache", action="store_true", help="Disable disk cache")
+
     parser = argparse.ArgumentParser(
         prog="london-data-store",
         description="Query the London Data Store catalogue",
     )
-    parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON")
-    parser.add_argument(
-        "--format", choices=["table", "plain"], default="plain", dest="output_format", help="Output format"
-    )
-    parser.add_argument("--limit", type=int, default=None, help="Limit number of results")
-    parser.add_argument("--no-cache", action="store_true", help="Disable disk cache")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # slugs
-    subparsers.add_parser("slugs", help="List all dataset slugs")
+    subparsers.add_parser("slugs", help="List all dataset slugs", parents=[shared])
 
     # titles
-    subparsers.add_parser("titles", help="List all dataset titles")
+    subparsers.add_parser("titles", help="List all dataset titles", parents=[shared])
 
     # search
-    search_parser = subparsers.add_parser("search", help="Fuzzy-search dataset slugs")
+    search_parser = subparsers.add_parser("search", help="Fuzzy-search dataset slugs", parents=[shared])
     search_parser.add_argument("term", help="Search term")
     search_parser.add_argument("--scored", action="store_true", help="Show similarity scores")
+    search_parser.add_argument(
+        "--sort", choices=["date", "title"], default=None, help="Sort by date (most recent first) or title"
+    )
 
     # formats
-    subparsers.add_parser("formats", help="List all available data formats")
+    subparsers.add_parser("formats", help="List all available data formats", parents=[shared])
 
     # urls
-    urls_parser = subparsers.add_parser("urls", help="Get download URLs for a slug")
+    urls_parser = subparsers.add_parser("urls", help="Get download URLs for a slug", parents=[shared])
     urls_parser.add_argument("slug", help="Dataset slug")
 
     # keywords
-    kw_parser = subparsers.add_parser("keywords", help="Search datasets by keyword/tag")
+    kw_parser = subparsers.add_parser("keywords", help="Search datasets by keyword/tag", parents=[shared])
     kw_parser.add_argument("keyword", help="Keyword to search tags")
 
     # info (v2)
-    info_parser = subparsers.add_parser("info", help="Show full metadata for a dataset")
+    info_parser = subparsers.add_parser("info", help="Show full metadata for a dataset", parents=[shared])
     info_parser.add_argument("slug", help="Dataset slug")
 
     # topics (v2)
-    topics_parser = subparsers.add_parser("topics", help="List all topic categories")
+    topics_parser = subparsers.add_parser("topics", help="List all topic categories", parents=[shared])
     topics_parser.add_argument("--filter", dest="topic_filter", help="Filter datasets by topic")
 
     # download (v2)
-    dl_parser = subparsers.add_parser("download", help="Download a dataset file")
+    dl_parser = subparsers.add_parser("download", help="Download a dataset file", parents=[shared])
     dl_parser.add_argument("slug", help="Dataset slug")
     dl_parser.add_argument("--format", dest="dl_format", help="File format (e.g., csv, geojson)")
     dl_parser.add_argument("--dest", default=".", help="Destination directory or file path")
@@ -113,38 +119,69 @@ def main(argv=None):
                 else:
                     for slug in slugs:
                         print(slug)
-            
+
             elif args.command == "titles":
                 titles = lds.get_all_titles()
                 limit = args.limit
                 if limit:
                     titles = titles[:limit]
-                
+
                 if args.json_output:
                     _output(titles, args)
                 else:
                     for title in titles:
-                        print(titles)
+                        print(title)
 
             elif args.command == "search":
+                # Build title -> (slug, date) lookup for enriching scored results
+                title_to_info = {
+                    x.get("title", "").strip(): (
+                        x.get("slug"),
+                        x.get("updatedAt") or x.get("createdAt") or "",
+                    )
+                    for x in lds.get_data_from_url()
+                }
+                limit = args.limit or 20
+
+                sort_by = getattr(args, "sort", None)
+
                 if args.scored:
-                    results = lds.search(args.term, limit=args.limit or 20)
+                    # When sorting, fetch all matches first so sort applies before limit
+                    fetch_limit = 10_000 if sort_by else limit
+                    results = lds.search(args.term, limit=fetch_limit)
+                    enriched = [
+                        (t, title_to_info.get(t, ("", ""))[0], title_to_info.get(t, ("", ""))[1], sc)
+                        for t, sc in results
+                    ]
+                    if sort_by == "date":
+                        enriched.sort(key=lambda x: x[2], reverse=True)
+                    elif sort_by == "title":
+                        enriched.sort(key=lambda x: x[0].lower())
+                    enriched = enriched[:limit]
+
                     if args.json_output:
-                        _output([{"title": s, "score": round(sc, 4)} for s, sc in results], args)
+                        _output(
+                            [{"title": t, "slug": s, "date": d, "score": round(sc, 4)} for t, s, d, sc in enriched],
+                            args,
+                        )
                     else:
-                        for title, score in results:
-                            print(f"{score:.4f}  {title}")
+                        for title, slug, date, score in enriched:
+                            print(f"{score:.4f}  {title}  [{slug}]  {date}")
                 else:
-                    scored = lds.search(args.term, limit=args.limit or 20)
-                    results = [s for s, _ in scored]
+                    results = lds.get_slugs_for_string_in_title(args.term)
                     if results:
+                        if sort_by == "date":
+                            results.sort(key=lambda x: x[2], reverse=True)
+                        elif sort_by == "title":
+                            results.sort(key=lambda x: x[0].lower())
+                        items = results[:limit]
                         if args.json_output:
-                            _output(results, args)
+                            _output([{"title": t, "slug": s, "date": d} for t, s, d in items], args)
                         else:
-                            for slug in results:
-                                print(slug)
+                            for title, slug, date in items:
+                                print(f"{title}  [{slug}]  {date}")
                     else:
-                        print(f"No slugs matching '{args.term}'")
+                        print(f"No datasets matching '{args.term}'")
                         return 1
 
             elif args.command == "formats":

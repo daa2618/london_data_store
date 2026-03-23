@@ -155,7 +155,6 @@ class LondonDataStore:
         slugs = list(set([x.get("slug") for x in self.get_data_from_url()]))
         slugs.sort()
         return slugs
-    
 
     def filter_slugs_for_string(self, string: str) -> list[str] | None:
         """Filters a list of slugs to retain only those containing a given string.
@@ -177,6 +176,45 @@ class LondonDataStore:
         )
         _validate_string(string, "string")
         return _search_list_for_string(self.get_all_slugs(), string)
+
+    def filter_title_for_string(self, string: str) -> list[str] | None:
+        """Filter dataset titles using fuzzy matching.
+
+        Args:
+            string: The string to search for within titles.
+
+        Returns:
+            A list of matching titles, or None if no titles match.
+        """
+        _validate_string(string, "string")
+        return _search_list_for_string(self.get_all_titles(), string)
+
+    def get_slugs_for_string_in_title(self, string: str) -> list[tuple[str, str, str]] | None:
+        """Search for datasets by title and return matched (title, slug, date) tuples.
+
+        Uses the modified date (updatedAt) when available, falling back to
+        the published date (createdAt).
+
+        Args:
+            string: The string to search for within dataset titles.
+
+        Returns:
+            A list of (title, slug, date) tuples for matched titles, or None if no match.
+        """
+        _validate_string(string, "string")
+        matched_titles = self.filter_title_for_string(string)
+        if not matched_titles:
+            return None
+        title_to_info = {
+            x.get("title", "").strip(): (x.get("slug"), x.get("updatedAt") or x.get("createdAt") or "")
+            for x in self.get_data_from_url()
+        }
+        results = []
+        for title in matched_titles:
+            if title in title_to_info:
+                slug, date = title_to_info[title]
+                results.append((title, slug, date))
+        return results or None
 
     def get_all_d_types(self) -> list[str]:
         """Retrieves a unique list of data types from a collection of resources.
@@ -263,8 +301,8 @@ class LondonDataStore:
                     )
         _bl.info(f"{len(urls)} urls have been found. Choose relevant url.")
         return urls
-    
-    def _filter_for_keyword(self, required:str, keyword:str)->list[str]:
+
+    def _filter_for_keyword(self, required: str, keyword: str) -> list[str]:
         _validate_string(keyword, "keyword")
         stemmer = _get_stemmer()
         search_terms = [stemmer.stem(x) for x in re.sub("[-_]", " ", keyword.strip().lower()).split(" ")]
@@ -274,8 +312,6 @@ class LondonDataStore:
             if any(word in y for y in [stemmer.stem(z) for z in x.get("tags")] for word in search_terms)
         ]
         return selected
-    
-
 
     def filter_slugs_for_keyword(self, keyword: str) -> list[str]:
         """Filters a list of slugs based on a keyword, using stemming for improved matching.
@@ -287,10 +323,9 @@ class LondonDataStore:
             A list of matching slug strings. Empty list if no matches.
         """
         return self._filter_for_keyword("slug", keyword)
-    
-    def filter_titles_for_keyword(self, keyword:str) -> list[str]:
-        return self._filter_for_keyword("title", keyword)
 
+    def filter_titles_for_keyword(self, keyword: str) -> list[str]:
+        return self._filter_for_keyword("title", keyword)
 
     def get_map_data_to_plot(self, slug: str, extension: str):
         """Retrieves and processes map data for plotting.
@@ -353,7 +388,6 @@ class LondonDataStore:
         titles = list(set([x.get("title", "").strip() for x in self.get_data_from_url()]))
         titles.sort()
         return titles
-    
 
     def search(self, term: str, limit: int = 20) -> list[tuple[str, float]]:
         """Search titles by term, returning (slug, score) pairs sorted by score descending.
