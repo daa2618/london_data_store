@@ -65,6 +65,9 @@ def main(argv=None):
     # slugs
     subparsers.add_parser("slugs", help="List all dataset slugs")
 
+    # titles
+    subparsers.add_parser("titles", help="List all dataset titles")
+
     # search
     search_parser = subparsers.add_parser("search", help="Fuzzy-search dataset slugs")
     search_parser.add_argument("term", help="Search term")
@@ -110,15 +113,27 @@ def main(argv=None):
                 else:
                     for slug in slugs:
                         print(slug)
+            
+            elif args.command == "titles":
+                titles = lds.get_all_titles()
+                limit = args.limit
+                if limit:
+                    titles = titles[:limit]
+                
+                if args.json_output:
+                    _output(titles, args)
+                else:
+                    for title in titles:
+                        print(titles)
 
             elif args.command == "search":
                 if args.scored:
                     results = lds.search(args.term, limit=args.limit or 20)
                     if args.json_output:
-                        _output([{"slug": s, "score": round(sc, 4)} for s, sc in results], args)
+                        _output([{"title": s, "score": round(sc, 4)} for s, sc in results], args)
                     else:
-                        for slug, score in results:
-                            print(f"{score:.4f}  {slug}")
+                        for title, score in results:
+                            print(f"{score:.4f}  {title}")
                 else:
                     scored = lds.search(args.term, limit=args.limit or 20)
                     results = [s for s, _ in scored]
@@ -153,13 +168,13 @@ def main(argv=None):
                     return 1
 
             elif args.command == "keywords":
-                results = lds.filter_slugs_for_keyword(args.keyword)
+                results = lds.filter_titles_for_keyword(args.keyword)
                 if results:
                     if args.json_output:
                         _output(results, args)
                     else:
-                        for slug in results:
-                            print(slug)
+                        for title in results:
+                            print(title)
                 else:
                     print(f"No datasets matching keyword '{args.keyword}'")
                     return 1

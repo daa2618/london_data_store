@@ -155,6 +155,7 @@ class LondonDataStore:
         slugs = list(set([x.get("slug") for x in self.get_data_from_url()]))
         slugs.sort()
         return slugs
+    
 
     def filter_slugs_for_string(self, string: str) -> list[str] | None:
         """Filters a list of slugs to retain only those containing a given string.
@@ -262,6 +263,19 @@ class LondonDataStore:
                     )
         _bl.info(f"{len(urls)} urls have been found. Choose relevant url.")
         return urls
+    
+    def _filter_for_keyword(self, required:str, keyword:str)->list[str]:
+        _validate_string(keyword, "keyword")
+        stemmer = _get_stemmer()
+        search_terms = [stemmer.stem(x) for x in re.sub("[-_]", " ", keyword.strip().lower()).split(" ")]
+        selected = [
+            x.get(required)
+            for x in self.get_data_from_url()
+            if any(word in y for y in [stemmer.stem(z) for z in x.get("tags")] for word in search_terms)
+        ]
+        return selected
+    
+
 
     def filter_slugs_for_keyword(self, keyword: str) -> list[str]:
         """Filters a list of slugs based on a keyword, using stemming for improved matching.
@@ -272,15 +286,11 @@ class LondonDataStore:
         Returns:
             A list of matching slug strings. Empty list if no matches.
         """
-        _validate_string(keyword, "keyword")
-        stemmer = _get_stemmer()
-        search_terms = [stemmer.stem(x) for x in re.sub("[-_]", " ", keyword.strip().lower()).split(" ")]
-        slugs = [
-            x.get("slug")
-            for x in self.get_data_from_url()
-            if any(word in y for y in [stemmer.stem(z) for z in x.get("tags")] for word in search_terms)
-        ]
-        return slugs
+        return self._filter_for_keyword("slug", keyword)
+    
+    def filter_titles_for_keyword(self, keyword:str) -> list[str]:
+        return self._filter_for_keyword("title", keyword)
+
 
     def get_map_data_to_plot(self, slug: str, extension: str):
         """Retrieves and processes map data for plotting.
@@ -339,20 +349,26 @@ class LondonDataStore:
 
     # ── v2 methods ─────────────────────────────────────────────────
 
-    def search(self, term: str, limit: int = 20) -> list[tuple[str, float]]:
-        """Search slugs by term, returning (slug, score) pairs sorted by score descending.
+    def get_all_titles(self) -> list[str]:
+        titles = list(set([x.get("title", "").strip() for x in self.get_data_from_url()]))
+        titles.sort()
+        return titles
+    
 
-        Uses SequenceMatcher similarity scoring against all slugs.
+    def search(self, term: str, limit: int = 20) -> list[tuple[str, float]]:
+        """Search titles by term, returning (slug, score) pairs sorted by score descending.
+
+        Uses SequenceMatcher similarity scoring against all titles.
 
         Args:
             term: The search term.
             limit: Maximum number of results to return.
 
         Returns:
-            A list of (slug, score) tuples sorted by score descending.
+            A list of (title, score) tuples sorted by score descending.
         """
         _validate_string(term, "term")
-        list_ops = ListOperations(self.get_all_slugs(), search_string=term)
+        list_ops = ListOperations(self.get_all_titles(), search_string=term)
         scored = list_ops.search_list_with_scores()
         return scored[:limit]
 

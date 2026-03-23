@@ -30,6 +30,13 @@ pip install -e .
 ```
 
 ### Optional extras
+
+#### poetry install
+```bash
+poetry install --extras "dev geo async"
+```
+
+#### pip install
 ```bash
 pip install -e ".[geo]"     # spatial data support (geopandas)
 pip install -e ".[async]"   # async client (httpx)
