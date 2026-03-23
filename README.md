@@ -1,16 +1,16 @@
 # london-data-store
 
-Lightweight Python client for the [London Data Store](https://data.london.gov.uk/) dataset catalogue. It wraps the portal's v2 JSON export API to discover datasets, search with scored results, filter by topic/publisher/licence, download files, and load spatial layers into GeoPandas — with disk caching, typed models, and an async alternative.
+Lightweight Python client for the [London Data Store](https://data.london.gov.uk/) dataset catalogue. It wraps the portal's v2 JSON export API to discover datasets, search by title with scored results, filter by topic/publisher/licence, download files, and load spatial layers into GeoPandas — with disk caching, typed models, and an async alternative.
 
 ## Features
 - **Disk-cached catalogue** — the ~10 MB JSON feed is cached locally (24-hour TTL) so repeated calls are instant.
-- **Scored search** — fuzzy slug matching returns `(slug, score)` pairs via SequenceMatcher similarity.
+- **Title-based search** — fuzzy title matching returns `(title, slug, date)` tuples or `(title, score)` pairs via SequenceMatcher similarity.
 - **Rich metadata** — `Dataset` and `Resource` dataclasses expose 20+ fields (topics, publisher, licence, temporal coverage, file hashes, etc.).
-- **Filtering** — filter datasets by topic, publisher, update frequency, licence, format, or keyword.
-- **File downloads** — streaming downloads with progress callbacks, MD5 integrity verification, and atomic writes.
+- **Filtering** — filter datasets by topic, publisher, update frequency, licence, format, or keyword (with stemming).
+- **File downloads** — streaming downloads with progress callbacks, MD5 integrity checks, and atomic writes.
 - **Spatial data** — pull GeoJSON/GeoPackage/Shapefile layers directly into GeoPandas (EPSG:4326).
 - **Async client** — `AsyncLondonDataStore` using httpx for concurrent operations.
-- **CLI** — subcommands for search, info, topics, download, and more.
+- **CLI** — subcommands for search, titles, info, topics, download, and more.
 - **Custom exceptions** — `DatasetNotFoundError`, `FormatNotAvailableError`, `DownloadError`, `CacheError`.
 
 ## Installation
@@ -48,8 +48,11 @@ pip install -e ".[dev]"     # development tools (pytest, ruff, pre-commit)
 from london_data_store import LondonDataStore
 
 with LondonDataStore() as lds:
-    # Scored search — returns (slug, score) tuples
-    results = lds.search("population", limit=5)
+    # Search by title — returns (title, slug, date) tuples
+    results = lds.get_slugs_for_string_in_title("population")
+
+    # Scored search — returns (title, score) tuples
+    scored = lds.search("population", limit=5)
 
     # Full dataset metadata
     dataset = lds.get_dataset("population-projections")
@@ -60,15 +63,16 @@ with LondonDataStore() as lds:
     tfl_data = lds.filter_by_publisher("Transport for London")
     open_data = lds.filter_by_licence("open")
 
-    # Browse all topics
+    # Browse all titles and topics
+    titles = lds.get_all_titles()
     topics = lds.get_all_topics()
+
+    # Search by keyword/tag (with stemming)
+    cycling = lds.filter_slugs_for_keyword("cycling")
+    cycling_titles = lds.filter_titles_for_keyword("cycling")
 
     # Download a file
     path = lds.download_file("population-projections", format="csv")
-
-    # Legacy methods still work
-    all_slugs = lds.get_all_slugs()
-    cycling = lds.filter_slugs_for_keyword("cycling")
 ```
 
 ### Async
@@ -99,20 +103,34 @@ with LondonDataStore() as lds:
 ```
 
 ## CLI
-```bash
-london-data-store slugs                         # list all dataset slugs
-london-data-store search "population"           # fuzzy search
-london-data-store search "population" --scored  # with similarity scores
-london-data-store info "cycling-infrastructure" # full dataset metadata
-london-data-store topics                        # list all topic categories
-london-data-store topics --filter transport     # datasets in a topic
-london-data-store download "population-projections" --format csv --progress
-london-data-store formats                       # list available formats
-london-data-store urls "population-projections" # get download URLs
-london-data-store keywords "cycling"            # search by keyword/tag
-```
 
-Global options: `--json`, `--format {table,plain}`, `--limit N`, `--no-cache`.
+Options (`--json`, `--output-format`, `--limit`, `--no-cache`) go after the subcommand.
+
+```bash
+# Search (returns title, slug, date)
+london-data-store search "population"                          # fuzzy title search
+london-data-store search "population" --scored                 # with similarity scores
+london-data-store search "population" --sort date --limit 20   # most recent first
+london-data-store search "population" --sort title             # alphabetical
+london-data-store search "population" --json                   # JSON output
+
+# Browse
+london-data-store slugs                                        # list all dataset slugs
+london-data-store titles                                       # list all dataset titles
+london-data-store formats                                      # list available data formats
+london-data-store topics                                       # list all topic categories
+london-data-store topics --filter transport                    # datasets in a topic
+
+# Detail
+london-data-store info "cycling-infrastructure"                # full dataset metadata
+london-data-store info "cycling-infrastructure" --json         # as JSON
+london-data-store urls "population-projections"                # get download URLs
+london-data-store keywords "cycling"                           # search by keyword/tag
+
+# Download
+london-data-store download "population-projections" --format csv --progress
+london-data-store download "population-projections" --dest ./data/
+```
 
 ## Development
 
